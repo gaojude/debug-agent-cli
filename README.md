@@ -135,3 +135,11 @@ pnpm build
 # Run built version
 pnpm start
 ```
+
+## Install to Global
+This is for debugging only.
+
+```bash
+pnpm build
+pnpm link --global
+```
