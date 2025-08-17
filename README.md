@@ -1,3 +1,5 @@
+Please join https://discord.gg/hQQkVpgn
+
 # Debug Agent CLI
 
 A command-line tool for recording, replaying, and analyzing browser sessions with AI-powered debugging capabilities.
