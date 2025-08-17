@@ -154,7 +154,13 @@ export class BrowserRecorder {
         const pageInfo = this.pages.get(pageId);
         if (pageInfo) {
           pageInfo.url = currentUrl;
-          pageInfo.title = await page.title();
+          try {
+            pageInfo.title = await page.title();
+          } catch (err) {
+            // Title might not be available immediately after navigation
+            // or the execution context might be destroyed
+            pageInfo.title = pageInfo.url || '';
+          }
         }
 
         this.addEvent({
@@ -197,7 +203,13 @@ export class BrowserRecorder {
         const pageInfo = this.pages.get(pageId);
         if (pageInfo) {
           pageInfo.url = currentUrl;
-          pageInfo.title = await page.title();
+          try {
+            pageInfo.title = await page.title();
+          } catch (err) {
+            // Title might not be available immediately after navigation
+            // or the execution context might be destroyed
+            pageInfo.title = pageInfo.url || '';
+          }
         }
       }
     });
