@@ -187,8 +187,8 @@ export class Replay {
       const canShowUI = Boolean(
         process.env.DISPLAY || process.env.WAYLAND_DISPLAY
       );
-      const effectiveHeadless = canShowUI ? this.options.headless : true;
-      const effectiveDevtools = canShowUI ? this.options.devtools : false;
+      const effectiveHeadless = this.options.headless;
+      const effectiveDevtools = this.options.devtools;
 
       if (wsl && !canShowUI && this.options.headless === false) {
         console.log(

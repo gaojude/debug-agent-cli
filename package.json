@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js"
+    "start": "node dist/cli.js",
+    "test:serve": "cd test-sites/broken-form-validation && node server.js",
+    "test:list": "ls -la test-sites/"
   },
   "dependencies": {
     "chalk": "^5.3.0",
