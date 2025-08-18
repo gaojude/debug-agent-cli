@@ -89,7 +89,7 @@ export class BrowserRecorder {
       ],
     });
 
-    this.context = await this.browser.newContext();
+    this.context = await this.browser.newContext({ viewport: null });
     this.isRecording = true;
     this.recording = this.initRecording();
     this.eventCounter = 0;
@@ -463,6 +463,15 @@ export class BrowserRecorder {
         },
         true
       );
+
+      function onResize() {
+        track("viewport_resize", {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        });
+      }
+      onResize();
+      window.addEventListener("resize", onResize);
 
       console.log(
         "TRACK:" +
