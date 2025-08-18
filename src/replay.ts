@@ -484,6 +484,20 @@ export class Replay {
         }
         break;
       }
+      case "viewport_resize": {
+        const p = event.pageId ? pageMap.get(event.pageId) : Array.from(pageMap.values())[0];
+        const width = event.data?.width;
+        const height = event.data?.height;
+        if (p && typeof width === "number" && typeof height === "number") {
+          try {
+            await p.setViewportSize({ width, height });
+            console.log(chalk.cyan(`🖥️  Resize viewport to ${width}x${height}`));
+          } catch (e: any) {
+            console.log(chalk.red(`❌ Viewport resize error: ${e.message || String(e)}`));
+          }
+        }
+        break;
+      }
     }
 
     return null;
