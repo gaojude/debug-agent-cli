@@ -71,6 +71,18 @@ export interface ReplayContext {
   meta: { startedAt: number; endedAt: number; durationMs: number };
 }
 
+export interface NetworkConditions {
+  offline: boolean;
+  downloadThroughput: number;
+  uploadThroughput: number;
+  latency: number;
+}
+
+export interface NetworkConditionsPreset {
+  name: string;
+  conditions: NetworkConditions;
+}
+
 export interface DebugAnalysisResult {
   success: boolean;
   answer?: string;

@@ -1,7 +1,7 @@
-import { chromium, Browser, BrowserContext, Page } from "playwright";
+import { chromium, Browser, BrowserContext, Page, CDPSession } from "playwright";
 import * as fs from "fs/promises";
 import * as path from "path";
-import { Recording, PageInfo, InteractionEvent } from "./types.js";
+import { Recording, PageInfo, InteractionEvent, NetworkConditions } from "./types.js";
 import chalk from "chalk";
 
 export class BrowserRecorder {
@@ -16,6 +16,8 @@ export class BrowserRecorder {
   private eventCounter: number = 0;
   private browserClosedCallback?: () => void;
   private trackedPages: Set<Page> = new Set();
+  private cdpSessions: Map<string, CDPSession> = new Map();
+  private currentNetworkConditions: NetworkConditions | null = null;
 
   constructor(recordingPath?: string) {
     this.recording = this.initRecording();
@@ -32,6 +34,59 @@ export class BrowserRecorder {
         recordedAt: new Date().toISOString(),
       },
     };
+  }
+
+  private getNetworkPresets(): { [key: string]: NetworkConditions } {
+    return {
+      'Fast 3G': {
+        offline: false,
+        downloadThroughput: 150 * 1024,
+        uploadThroughput: 75 * 1024,
+        latency: 562.5
+      },
+      'Slow 3G': {
+        offline: false,
+        downloadThroughput: 50 * 1024,
+        uploadThroughput: 50 * 1024,
+        latency: 2000
+      },
+      'Fast 4G': {
+        offline: false,
+        downloadThroughput: 400 * 1024,
+        uploadThroughput: 400 * 1024,
+        latency: 20
+      },
+      'Offline': {
+        offline: true,
+        downloadThroughput: 0,
+        uploadThroughput: 0,
+        latency: 0
+      },
+      'No throttling': {
+        offline: false,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+        latency: 0
+      }
+    };
+  }
+
+  private detectNetworkConditionsChange(newConditions: NetworkConditions): string | null {
+    const presets = this.getNetworkPresets();
+    
+    for (const [name, conditions] of Object.entries(presets)) {
+      if (
+        conditions.offline === newConditions.offline &&
+        conditions.downloadThroughput === newConditions.downloadThroughput &&
+        conditions.uploadThroughput === newConditions.uploadThroughput &&
+        Math.abs(conditions.latency - newConditions.latency) < 10 // Allow small variance
+      ) {
+        return name;
+      }
+    }
+    
+    // Return custom preset name if no match
+    return `Custom (${newConditions.offline ? 'Offline' : 'Online'}, ↓${Math.round(newConditions.downloadThroughput / 1024)}kb/s, ↑${Math.round(newConditions.uploadThroughput / 1024)}kb/s, ${newConditions.latency}ms)`;
   }
 
   private addEvent(event: Partial<InteractionEvent>) {
@@ -60,6 +115,8 @@ export class BrowserRecorder {
       ).substring(0, 30)}"`);
     } else if (event.type === "navigation") {
       logMessage += chalk.gray(`: ${event.data?.url}`);
+    } else if (event.type === "network_conditions_change" || event.type === "network_conditions_initial") {
+      logMessage += chalk.blue(` → ${event.data?.presetName}`);
     }
 
     console.log(logMessage);
@@ -136,6 +193,85 @@ export class BrowserRecorder {
     });
 
     this.currentPageId = pageId;
+
+    // Set up CDP session for network monitoring
+    try {
+      const cdpSession = await this.context!.newCDPSession(page);
+      this.cdpSessions.set(pageId, cdpSession);
+      
+      // Enable network domain
+      await cdpSession.send('Network.enable');
+      
+      // Monitor network conditions by checking periodically
+      // Note: Chrome DevTools Protocol doesn't provide real-time network condition change events
+      // This approach captures the initial state and relies on the user to manually trigger changes
+      let lastCheckedConditions = this.currentNetworkConditions;
+      const networkCheckInterval = setInterval(async () => {
+        try {
+          const currentConditions = await cdpSession.send('Network.getNetworkConditions');
+          const newConditions: NetworkConditions = {
+            offline: currentConditions.offline,
+            downloadThroughput: currentConditions.downloadThroughput,
+            uploadThroughput: currentConditions.uploadThroughput,
+            latency: currentConditions.latency
+          };
+          
+          // Check if conditions changed
+          if (!lastCheckedConditions || 
+              lastCheckedConditions.offline !== newConditions.offline ||
+              lastCheckedConditions.downloadThroughput !== newConditions.downloadThroughput ||
+              lastCheckedConditions.uploadThroughput !== newConditions.uploadThroughput ||
+              Math.abs(lastCheckedConditions.latency - newConditions.latency) > 10) {
+            
+            const presetName = this.detectNetworkConditionsChange(newConditions);
+            lastCheckedConditions = newConditions;
+            this.currentNetworkConditions = newConditions;
+            
+            this.addEvent({
+              type: "network_conditions_change",
+              data: {
+                presetName,
+                conditions: newConditions,
+                pageId
+              },
+            });
+          }
+        } catch (e) {
+          // Network conditions not available or changed, ignore
+        }
+      }, 1000); // Check every second
+      
+      // Store interval ID for cleanup
+      (page as any)._networkCheckInterval = networkCheckInterval;
+      
+      // Get initial network conditions
+      try {
+        const initialConditions = await cdpSession.send('Network.getNetworkConditions');
+        if (initialConditions) {
+          this.currentNetworkConditions = {
+            offline: initialConditions.offline,
+            downloadThroughput: initialConditions.downloadThroughput,
+            uploadThroughput: initialConditions.uploadThroughput,
+            latency: initialConditions.latency
+          };
+          
+          const presetName = this.detectNetworkConditionsChange(this.currentNetworkConditions);
+          this.addEvent({
+            type: "network_conditions_initial",
+            data: {
+              presetName,
+              conditions: this.currentNetworkConditions,
+              pageId
+            },
+          });
+        }
+      } catch (e) {
+        // Initial conditions might not be available, ignore
+      }
+      
+    } catch (e) {
+      console.log(chalk.yellow(`⚠️ Could not set up network monitoring for page ${pageId}: ${e}`));
+    }
 
     this.addEvent({
       type: "newtab",
@@ -221,6 +357,22 @@ export class BrowserRecorder {
       });
       this.pages.delete(pageId);
       this.trackedPages.delete(page);
+      
+      // Clean up network check interval
+      if ((page as any)._networkCheckInterval) {
+        clearInterval((page as any)._networkCheckInterval);
+      }
+      
+      // Clean up CDP session
+      const cdpSession = this.cdpSessions.get(pageId);
+      if (cdpSession) {
+        try {
+          cdpSession.detach();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+        this.cdpSessions.delete(pageId);
+      }
 
       const remainingPages = Array.from(this.pages.values());
       if (remainingPages.length > 0) {
@@ -526,6 +678,24 @@ export class BrowserRecorder {
 
   async cleanup() {
     this.isRecording = false;
+    
+    // Clean up all network check intervals
+    for (const page of this.trackedPages) {
+      if ((page as any)._networkCheckInterval) {
+        clearInterval((page as any)._networkCheckInterval);
+      }
+    }
+    
+    // Clean up all CDP sessions
+    for (const [pageId, cdpSession] of this.cdpSessions) {
+      try {
+        await cdpSession.detach();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+    this.cdpSessions.clear();
+    
     if (this.browser) {
       try {
         await this.browser.close();

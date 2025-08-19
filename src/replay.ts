@@ -1,9 +1,9 @@
-import { chromium, Browser, BrowserContext, Page } from "playwright";
+import { chromium, Browser, BrowserContext, Page, CDPSession } from "playwright";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
 import chalk from "chalk";
-import { ReplayOptions, ReplayContext, Recording } from "./types.js";
+import { ReplayOptions, ReplayContext, Recording, NetworkConditions } from "./types.js";
 
 export type InstrumentationHooks = {
   setup?: (ctx: { page: Page }) => Promise<void> | void;
@@ -140,6 +140,7 @@ export class Replay {
   private instrumentationCode?: string;
   private pendingHooks?: InstrumentationHooks;
   private pendingHooksValue?: any;
+  private cdpSessions: Map<string, CDPSession> = new Map();
 
   constructor(options?: Partial<ReplayOptions>) {
     this.options = {
@@ -157,6 +158,17 @@ export class Replay {
 
   async stop() {
     this.stopped = true;
+    
+    // Clean up CDP sessions
+    for (const [pageId, cdpSession] of this.cdpSessions) {
+      try {
+        await cdpSession.detach();
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+    this.cdpSessions.clear();
+    
     try {
       if (this.context) await this.context.close();
     } catch {}
@@ -357,6 +369,16 @@ export class Replay {
 
       console.log(chalk.green("\n✅ Replay completed!"));
     } finally {
+      // Clean up CDP sessions
+      for (const [pageId, cdpSession] of this.cdpSessions) {
+        try {
+          await cdpSession.detach();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+      this.cdpSessions.clear();
+      
       try {
         if (this.context) await this.context.close();
       } catch {}
@@ -523,6 +545,35 @@ export class Replay {
             console.log(chalk.cyan(`🖥️  Resize viewport to ${width}x${height}`));
           } catch (e: any) {
             console.log(chalk.red(`❌ Viewport resize error: ${e.message || String(e)}`));
+          }
+        }
+        break;
+      }
+      case "network_conditions_change":
+      case "network_conditions_initial": {
+        const p = event.pageId ? pageMap.get(event.pageId) : Array.from(pageMap.values())[0];
+        const conditions: NetworkConditions = event.data?.conditions;
+        const presetName = event.data?.presetName;
+        
+        if (p && conditions) {
+          try {
+            let cdpSession = this.cdpSessions.get(event.pageId || '');
+            if (!cdpSession) {
+              cdpSession = await this.context!.newCDPSession(p);
+              this.cdpSessions.set(event.pageId || '', cdpSession);
+              await cdpSession.send('Network.enable');
+            }
+            
+            await cdpSession.send('Network.emulateNetworkConditions', {
+              offline: conditions.offline,
+              downloadThroughput: conditions.downloadThroughput,
+              uploadThroughput: conditions.uploadThroughput,
+              latency: conditions.latency
+            });
+            
+            console.log(chalk.blue(`🌐 Network conditions set to: ${presetName}`));
+          } catch (e: any) {
+            console.log(chalk.red(`❌ Network conditions error: ${e.message || String(e)}`));
           }
         }
         break;

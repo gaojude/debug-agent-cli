@@ -1,0 +1,88 @@
+{
+  "startTime": 1734635000000,
+  "endTime": 1734635010000,
+  "events": [
+    {
+      "timestamp": 1734635000100,
+      "type": "newtab",
+      "data": {
+        "pageId": "page_test_123",
+        "url": "about:blank",
+        "index": 0
+      },
+      "pageId": "page_test_123"
+    },
+    {
+      "timestamp": 1734635000200,
+      "type": "network_conditions_initial",
+      "data": {
+        "presetName": "No throttling",
+        "conditions": {
+          "offline": false,
+          "downloadThroughput": -1,
+          "uploadThroughput": -1,
+          "latency": 0
+        },
+        "pageId": "page_test_123"
+      },
+      "pageId": "page_test_123"
+    },
+    {
+      "timestamp": 1734635001000,
+      "type": "navigation",
+      "data": {
+        "url": "https://example.com",
+        "pageId": "page_test_123",
+        "navigationType": "initial",
+        "previousUrl": "about:blank"
+      },
+      "pageId": "page_test_123"
+    },
+    {
+      "timestamp": 1734635005000,
+      "type": "network_conditions_change",
+      "data": {
+        "presetName": "Fast 3G",
+        "conditions": {
+          "offline": false,
+          "downloadThroughput": 153600,
+          "uploadThroughput": 76800,
+          "latency": 562.5
+        },
+        "pageId": "page_test_123"
+      },
+      "pageId": "page_test_123"
+    },
+    {
+      "timestamp": 1734635006000,
+      "type": "click",
+      "data": {
+        "x": 400,
+        "y": 300,
+        "clientX": 400,
+        "clientY": 300,
+        "button": 0,
+        "target": {
+          "tag": "BUTTON",
+          "id": "test-button",
+          "class": "btn",
+          "text": "Click me",
+          "rect": {
+            "x": 350,
+            "y": 280,
+            "width": 100,
+            "height": 40
+          }
+        }
+      },
+      "pageId": "page_test_123"
+    }
+  ],
+  "metadata": {
+    "browser": "chromium",
+    "platform": "linux",
+    "recordedAt": "2024-12-19T14:00:00.000Z",
+    "duration": 10000,
+    "name": "test-network-conditions"
+  }
+}
