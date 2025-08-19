@@ -146,6 +146,7 @@ export class Replay {
       speed: 1,
       headless: false,
       devtools: false,
+      urlOverride: undefined,
       ...options,
     } as ReplayOptions;
   }
@@ -389,6 +390,24 @@ export class Replay {
     return recordingOrFile;
   }
 
+  private replaceBaseUrl(originalUrl: string, newBaseUrl: string): string {
+    if (!originalUrl || originalUrl === "about:blank") {
+      return originalUrl;
+    }
+
+    try {
+      const original = new URL(originalUrl);
+      const newBase = new URL(newBaseUrl);
+      
+      // Replace protocol, host, and port, but keep the path, search, and hash
+      return newBase.origin + original.pathname + original.search + original.hash;
+    } catch (error) {
+      // If URL parsing fails, return the original URL
+      console.log(chalk.yellow(`⚠️  Failed to parse URL for replacement: ${originalUrl}`));
+      return originalUrl;
+    }
+  }
+
   private async replayEvent(
     event: any,
     pageMap: Map<string, Page>,
@@ -419,7 +438,17 @@ export class Replay {
       }
       case "navigation": {
         const p = event.pageId ? pageMap.get(event.pageId) : Array.from(pageMap.values())[0];
-        const url = event.data?.url;
+        let url = event.data?.url;
+        
+        // Apply URL override if specified
+        if (url && url !== "about:blank" && this.options.urlOverride) {
+          const originalUrl = url;
+          url = this.replaceBaseUrl(url, this.options.urlOverride);
+          if (originalUrl !== url) {
+            console.log(chalk.cyan(`🔄 URL override: ${originalUrl} → ${url}`));
+          }
+        }
+        
         if (p && url && url !== "about:blank") {
           const current = p.url();
           if (current !== url) {

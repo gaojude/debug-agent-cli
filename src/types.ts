@@ -40,6 +40,7 @@ export interface ReplayOptions {
   speed: number;
   headless: boolean;
   devtools: boolean;
+  urlOverride?: string;
 }
 
 export interface ReplayContext {

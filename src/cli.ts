@@ -61,6 +61,7 @@ EXAMPLES:
   debug-agent inspect ./recordings/test-session.json --schema --sample 3
   debug-agent replay ./recordings/test-session.json --instrument ./monitor.js
   debug-agent replay ./recordings/test-session.json --speed 1.5 --headless
+  debug-agent replay ./recordings/test-session.json --url http://localhost:3000
   `));
 
 // Record command
@@ -331,18 +332,25 @@ program
   .option("-s, --speed <speed>", "Playback speed multiplier (0.5 to 3, default: 1)", "1")
   .option("--headless", "Run browser in headless mode (no visible window)")
   .option("-i, --instrument <filepath>", "Path to JavaScript instrumentation file with Playwright hooks")
+  .option("--url <url>", "Override the base URL for all navigation events during replay")
   .addHelpText('after', chalk.gray(`
   Details:
     - filepath: Path to the recording JSON file to replay
     - speed: Controls playback speed (0.5 = slower, 2 = faster, max: 3)
     - headless: Runs without showing browser window (useful for automated testing)
     - instrument: Path to a JS file that exports instrumentation hooks
+    - url: Override base URL for navigation events (e.g., replay on staging instead of production)
     
   Speed examples:
     - 0.5: Half speed (useful for debugging)
     - 1.0: Normal speed (default)
     - 2.0: Double speed
     - 3.0: Triple speed (maximum)
+    
+  URL Override examples:
+    - Original: https://production.example.com/login
+    - With --url https://staging.example.com: https://staging.example.com/login
+    - With --url http://localhost:3000: http://localhost:3000/login
     
   Instrumentation:
     The instrumentation file should export a function or object with these optional hooks:
@@ -405,6 +413,7 @@ program
         speed,
         headless: options.headless || false,
         devtools: !options.headless,
+        urlOverride: options.url,
       });
 
       // Set instrumentation code if provided
