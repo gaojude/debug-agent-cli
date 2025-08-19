@@ -10,9 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/cli.ts",
-    "start": "node dist/cli.js",
-    "test:serve": "cd test-sites/broken-form-validation && node server.js",
-    "test:list": "ls -la test-sites/"
+    "start": "node dist/cli.js"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",
