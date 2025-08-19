@@ -40,10 +40,10 @@ USAGE NOTES FOR LLM AGENTS:
      - Use --instrument <file.js> to inject custom instrumentation during replay
   
   4. INSTRUMENTATION:
-     - Write JavaScript files that hook into replay events
-     - Access the Playwright Page API to interact with the browser
-     - Collect data, take screenshots, monitor performance, etc.
-     - Return results from onComplete() hook for analysis
+     - Write JavaScript files with a setup hook
+     - Get FULL access to Playwright Browser, Context, Page, and PageMap
+     - Attach any listeners, inject scripts, monitor everything
+     - Complete control over browser automation during replay
   
   5. FILE FORMAT:
      - Recordings are saved as JSON files containing all browser events
@@ -267,55 +267,70 @@ Common event types and their data structures:
 
 INSTRUMENTATION CONTEXT:
 
-When writing instrumentation, you have access to:
+When writing instrumentation, you get FULL access to Playwright instances:
 
-1. The Playwright Page object with full API:
-   - page.screenshot()
-   - page.evaluate()
-   - page.content()
-   - page.title()
-   - page.url()
-   - page.waitForSelector()
-   - etc.
+1. Browser instance - Full browser control
+2. BrowserContext instance - Context management, cookies, storage
+3. Page instance - The main page being replayed
+4. PageMap - Map of all pages by their IDs
 
-2. Event information:
-   - event: The current event being replayed
-   - eventIndex: The index of the current event
+This gives you complete control to:
+- Attach listeners to any Playwright events
+- Monitor network, console, dialogs, downloads
+- Inject scripts, take screenshots, record videos
+- Access browser storage, cookies, local storage
+- Create new pages, contexts, or even browsers
+- Use any Playwright API without restrictions
 
-3. Hooks you can implement:
-   - setup({ page }): Initialize your instrumentation
-   - onBeforeEvent(event, { page, eventIndex }): Before each event
-   - onAfterEvent(event, { page, eventIndex }): After each event
-   - onComplete({ page }): Cleanup and return results
+The simplified interface has just ONE hook:
+
+- setup({ browser, context, page, pageMap }): Called once when first page loads
+  - browser: Playwright Browser instance
+  - context: Playwright BrowserContext instance  
+  - page: Playwright Page instance (first page)
+  - pageMap: Map<string, Page> of all pages
 
 Example instrumentation template:
 
-module.exports = (page) => ({
-  setup: async ({ page }) => {
-    // Initialize tracking
-    console.log('Starting instrumentation...');
-  },
-  
-  onBeforeEvent: async (event, { page, eventIndex }) => {
-    // Pre-event logic
-    if (event.type === 'navigation') {
-      console.log(\`Navigating to: \${event.data.url}\`);
-    }
-  },
-  
-  onAfterEvent: async (event, { page, eventIndex }) => {
-    // Post-event logic
-    if (event.type === 'click') {
-      // Take screenshot after clicks
-      await page.screenshot({ path: \`click-\${eventIndex}.png\` });
-    }
-  },
-  
-  onComplete: async ({ page }) => {
-    // Return analysis results
-    return {
-      finalUrl: page.url(),
-      title: await page.title()
+module.exports = () => ({
+  setup: async ({ browser, context, page, pageMap }) => {
+    // You have FULL access to Playwright API
+    console.log('Browser version:', browser.version());
+    
+    // Attach any Playwright event listeners
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
+    page.on('pageerror', err => console.error('PAGE ERROR:', err));
+    page.on('request', req => console.log('REQUEST:', req.url()));
+    page.on('response', res => console.log('RESPONSE:', res.status(), res.url()));
+    
+    // Monitor all pages
+    context.on('page', newPage => {
+      console.log('New page opened:', newPage.url());
+      // Attach listeners to new pages
+      newPage.on('load', () => console.log('Page loaded:', newPage.url()));
+    });
+    
+    // Inject scripts into every page
+    await context.addInitScript(() => {
+      window.addEventListener('error', e => {
+        console.log('INSTRUMENT: Window error:', e.message);
+      });
+    });
+    
+    // Take screenshots, evaluate scripts, anything!
+    setInterval(async () => {
+      const pages = Array.from(pageMap.values());
+      for (const p of pages) {
+        if (!p.isClosed()) {
+          const metrics = await p.evaluate(() => performance.memory);
+          console.log('Memory usage:', metrics);
+        }
+      }
+    }, 5000);
+    
+    // Return cleanup function if needed
+    return async () => {
+      console.log('Cleanup...');
     };
   }
 });
@@ -367,25 +382,31 @@ program
     - With --url http://localhost:3000: http://localhost:3000/login
     
   Instrumentation:
-    The instrumentation file should export a function or object with these optional hooks:
-    - setup({ page }): Called once when replay starts
-    - onBeforeEvent(event, { page, eventIndex }): Called before each event
-    - onAfterEvent(event, { page, eventIndex }): Called after each event  
-    - onComplete({ page }): Called when replay completes, return value is printed
+    The instrumentation file should export a function or object with a setup hook.
+    The setup hook receives FULL Playwright instances for maximum control:
+    - setup({ browser, context, page, pageMap }): Called once when first page loads
     
   Example instrumentation file:
-    module.exports = (page) => ({
-      setup: async ({ page }) => {
-        console.log('Replay starting...');
-      },
-      onAfterEvent: async (event, { page, eventIndex }) => {
-        if (event.type === 'click') {
-          await page.screenshot({ path: \`click-\${eventIndex}.png\` });
-        }
-      },
-      onComplete: async ({ page }) => {
-        const title = await page.title();
-        return { finalTitle: title };
+    module.exports = () => ({
+      setup: async ({ browser, context, page, pageMap }) => {
+        // Full access to Playwright API
+        console.log('Browser:', browser.version());
+        
+        // Attach any event listeners
+        page.on('console', msg => console.log('Console:', msg.text()));
+        page.on('request', req => console.log('Request:', req.url()));
+        
+        // Monitor all pages
+        context.on('page', newPage => {
+          console.log('New page:', newPage.url());
+        });
+        
+        // Take periodic screenshots
+        setInterval(async () => {
+          if (!page.isClosed()) {
+            await page.screenshot({ path: \`screenshot-\${Date.now()}.png\` });
+          }
+        }, 5000);
       }
     });
   `))

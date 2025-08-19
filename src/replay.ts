@@ -6,16 +6,12 @@ import chalk from "chalk";
 import { ReplayOptions, ReplayContext, Recording, NetworkConditions } from "./types.js";
 
 export type InstrumentationHooks = {
-  setup?: (ctx: { page: Page }) => Promise<void> | void;
-  onBeforeEvent?: (
-    event: any,
-    ctx: { page: Page; eventIndex: number }
-  ) => Promise<void> | void;
-  onAfterEvent?: (
-    event: any,
-    ctx: { page: Page; eventIndex: number }
-  ) => Promise<void> | void;
-  onComplete?: (ctx: { page: Page }) => Promise<any> | any;
+  setup?: (ctx: {
+    browser: Browser;
+    context: BrowserContext;
+    page: Page;
+    pageMap: Map<string, Page>;
+  }) => Promise<void> | void;
 };
 
 export function sanitizeInstrumentationCode(raw: string): string {
@@ -42,14 +38,9 @@ export function tryCompileInstrumentation(code: string): {
 
     if (typeof value === "function") {
       try {
-        const testResult = value.length >= 1 ? value({ mock: true }) : value();
+        const testResult = value();
         if (testResult && typeof testResult === "object") {
-          const hasHook = [
-            "setup",
-            "onBeforeEvent",
-            "onAfterEvent",
-            "onComplete",
-          ].some((hook) => typeof testResult[hook] === "function");
+          const hasHook = typeof testResult.setup === "function";
           if (hasHook) {
             return { ok: true, value };
           }
@@ -60,12 +51,7 @@ export function tryCompileInstrumentation(code: string): {
     }
 
     if (value && typeof value === "object") {
-      const hasHook = [
-        "setup",
-        "onBeforeEvent",
-        "onAfterEvent",
-        "onComplete",
-      ].some((hook) => typeof value[hook] === "function");
+      const hasHook = typeof value.setup === "function";
       if (hasHook) {
         return { ok: true, value };
       }
@@ -74,7 +60,7 @@ export function tryCompileInstrumentation(code: string): {
     return {
       ok: false,
       error: new Error(
-        "Must be a function returning hooks or an object with hook functions"
+        "Must be a function returning {setup} or an object with a setup function"
       ),
     };
   } catch (error) {
@@ -89,13 +75,12 @@ function isWSL(): boolean {
   return release.includes("microsoft") || release.includes("wsl");
 }
 
-function normalizeToHooks(value: any, page: Page | any): InstrumentationHooks {
+function normalizeToHooks(value: any): InstrumentationHooks {
   if (typeof value === "function") {
     try {
-      const pageArg = page && page.mock ? page : page;
-      const hooks = value(pageArg);
+      const hooks = value();
       if (hooks && typeof hooks === "object") {
-        return normalizeToHooks(hooks, page);
+        return normalizeToHooks(hooks);
       }
     } catch (e) {
       console.error(chalk.red("Failed to call instrumentation function:"), e);
@@ -105,16 +90,6 @@ function normalizeToHooks(value: any, page: Page | any): InstrumentationHooks {
   if (value && typeof value === "object") {
     const candidate: InstrumentationHooks = {
       setup: typeof value.setup === "function" ? value.setup : undefined,
-      onBeforeEvent:
-        typeof value.onBeforeEvent === "function"
-          ? value.onBeforeEvent
-          : undefined,
-      onAfterEvent:
-        typeof value.onAfterEvent === "function"
-          ? value.onAfterEvent
-          : undefined,
-      onComplete:
-        typeof value.onComplete === "function" ? value.onComplete : undefined,
     };
 
     return candidate;
@@ -266,8 +241,7 @@ export class Replay {
       // Pre-normalize hooks
       if (hooksValue) {
         try {
-          const mockPage = { mock: true };
-          this.pendingHooks = normalizeToHooks(hooksValue, mockPage as any);
+          this.pendingHooks = normalizeToHooks(hooksValue);
         } catch (e) {
           console.error(chalk.red("Failed to pre-normalize hooks:"), e);
         }
@@ -287,55 +261,32 @@ export class Replay {
         const delay = Math.round(delayRaw / Math.max(0.1, this.options.speed));
 
         try {
-          // Run onBeforeEvent hook if available
-          if (page && this.pendingHooks?.onBeforeEvent) {
-            const eventPage = event.pageId ? pageMap.get(event.pageId) : page;
-            if (eventPage) {
-              try {
-                await this.pendingHooks.onBeforeEvent(event, {
-                  page: eventPage,
-                  eventIndex: i,
-                });
-              } catch (e) {
-                console.error(chalk.red(`onBeforeEvent error for event ${i}:`), e);
-              }
-            }
-          }
-
           // Replay the event
           const result = await this.replayEvent(event, pageMap, attachPageListeners);
           if (result && !page) {
             page = result;
             
-            // Re-normalize hooks with real page
+            // Re-normalize hooks
             if (this.pendingHooksValue) {
               try {
-                this.pendingHooks = normalizeToHooks(this.pendingHooksValue, page);
+                this.pendingHooks = normalizeToHooks(this.pendingHooksValue);
               } catch (e) {
                 console.error(chalk.red("Failed to normalize hooks:"), e);
               }
             }
 
-            // Call setup hook
-            if (this.pendingHooks?.setup) {
+            // Call setup hook with full context
+            if (this.pendingHooks?.setup && this.browser && this.context) {
               try {
-                await this.pendingHooks.setup({ page });
+                await this.pendingHooks.setup({
+                  browser: this.browser,
+                  context: this.context,
+                  page,
+                  pageMap,
+                });
               } catch (e) {
                 console.error(chalk.red("Setup error:"), e);
               }
-            }
-          }
-
-          // Run onAfterEvent hook if available
-          const eventPageAfter = event.pageId ? pageMap.get(event.pageId) : page;
-          if (eventPageAfter && this.pendingHooks?.onAfterEvent) {
-            try {
-              await this.pendingHooks.onAfterEvent(event, {
-                page: eventPageAfter,
-                eventIndex: i,
-              });
-            } catch (e) {
-              console.error(chalk.red(`onAfterEvent error for event ${i}:`), e);
             }
           }
         } catch (e) {
@@ -348,24 +299,7 @@ export class Replay {
         }
       }
 
-      // Call onComplete hook
-      if (this.pendingHooks?.onComplete) {
-        const activePages = Array.from(pageMap.values()).filter(
-          (p) => !p.isClosed()
-        );
-        const pageForComplete =
-          activePages.length > 0 ? activePages[activePages.length - 1] : page;
-
-        if (pageForComplete) {
-          try {
-            this.finalResults = await this.pendingHooks.onComplete({
-              page: pageForComplete,
-            });
-          } catch (e) {
-            console.error(chalk.red("onComplete error:"), e);
-          }
-        }
-      }
+      // No onComplete hook needed - users can do everything in setup
 
       console.log(chalk.green("\n✅ Replay completed!"));
     } finally {
@@ -435,8 +369,6 @@ export class Replay {
     pageMap: Map<string, Page>,
     attachPageListeners: (p: Page) => void
   ): Promise<Page | null> {
-    let page: Page | null = null;
-
     switch (event.type) {
       case "newtab": {
         const newPage = await this.context!.newPage();
