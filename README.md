@@ -49,6 +49,17 @@ pnpm start replay my-session --speed 2
 Options:
 - `--speed <speed>`: Playback speed (0.5 to 3, default: 1)
 - `--headless`: Run in headless mode
+- `--url <url>`: Override base URL for navigation events (useful for testing recordings against different environments)
+
+Example with URL override:
+```bash
+# Original recording was made on https://production.example.com
+# Replay it against staging environment
+pnpm start replay my-session --url https://staging.example.com
+
+# Or replay against local development server
+pnpm start replay my-session --url http://localhost:3000
+```
 
 ### List Recordings
 
