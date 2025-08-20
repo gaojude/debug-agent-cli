@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Network Recorder</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 10px;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+    .status {
+      padding: 8px;
+      background: #f0f0f0;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    .quick-presets {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    button {
+      padding: 8px;
+      border: 1px solid #ddd;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    button:hover {
+      background: #f5f5f5;
+    }
+    button.active {
+      background: #2196F3;
+      color: white;
+      border-color: #2196F3;
+    }
+    .open-devtools {
+      width: 100%;
+      margin-top: 10px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <h3>Network Recorder</h3>
+  
+  <div class="status">
+    Current: <strong id="currentPreset">Loading...</strong>
+  </div>
+  
+  <div class="quick-presets">
+    <button data-preset="No throttling">No throttle</button>
+    <button data-preset="Fast 3G">Fast 3G</button>
+    <button data-preset="Slow 3G">Slow 3G</button>
+    <button data-preset="Offline">Offline</button>
+  </div>
+  
+  <button class="open-devtools" id="openDevTools">
+    Open DevTools Panel
+  </button>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
