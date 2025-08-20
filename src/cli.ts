@@ -110,6 +110,12 @@ program
         const name = path.basename(finalPath, '.json');
         const savedPath = await recorder.stopRecording(name);
         
+        // Check if recording was actually saved (returns empty string if not recording)
+        if (!savedPath) {
+          console.log(chalk.yellow("No active recording to save."));
+          process.exit(0);
+        }
+        
         // Move file to the requested location if different
         if (savedPath !== finalPath) {
           await fs.rename(savedPath, finalPath);
@@ -129,6 +135,12 @@ program
       
       const name = path.basename(finalPath, '.json');
       const savedPath = await recorder.stopRecording(name);
+      
+      // Check if recording was actually saved (returns empty string if not recording)
+      if (!savedPath) {
+        console.log(chalk.yellow("No active recording to save."));
+        process.exit(0);
+      }
       
       // Move file to the requested location if different
       if (savedPath !== finalPath) {
@@ -331,6 +343,7 @@ program
   .description("Replay a recorded browser session from the specified file")
   .option("-s, --speed <speed>", "Playback speed multiplier (0.5 to 3, default: 1)", "1")
   .option("--headless", "Run browser in headless mode (no visible window)")
+  .option("--devtools", "Open Chrome DevTools automatically during replay")
   .option("-i, --instrument <filepath>", "Path to JavaScript instrumentation file with Playwright hooks")
   .option("--url <url>", "Override the base URL for all navigation events during replay")
   .addHelpText('after', chalk.gray(`
@@ -338,6 +351,7 @@ program
     - filepath: Path to the recording JSON file to replay
     - speed: Controls playback speed (0.5 = slower, 2 = faster, max: 3)
     - headless: Runs without showing browser window (useful for automated testing)
+    - devtools: Opens Chrome DevTools automatically during replay (useful for debugging)
     - instrument: Path to a JS file that exports instrumentation hooks
     - url: Override base URL for navigation events (e.g., replay on staging instead of production)
     

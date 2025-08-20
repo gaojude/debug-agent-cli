@@ -5,3 +5,4 @@ recordings/
 .env.local
 *.log
 .DS_Store
+.chromium-profile-*

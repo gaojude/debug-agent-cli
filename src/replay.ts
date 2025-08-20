@@ -473,15 +473,38 @@ export class Replay {
         
         if (p && url && url !== "about:blank") {
           const current = p.url();
-          if (current !== url) {
+          
+          // Always navigate if it's a refresh, or if the URL is different
+          if (navigationType === "refresh" || current !== url) {
             try {
-              await p.goto(url, {
-                waitUntil: "domcontentloaded",
-                timeout: 60000,
-              });
-              console.log(chalk.cyan(`🔗 Navigate to ${url}`));
+              // For refresh, use reload instead of goto when on the same URL
+              if (navigationType === "refresh" && current === url) {
+                await p.reload({
+                  waitUntil: "domcontentloaded",
+                  timeout: 60000,
+                });
+                console.log(chalk.cyan(`🔄 Refresh page: ${url}`));
+              } else {
+                await p.goto(url, {
+                  waitUntil: "domcontentloaded",
+                  timeout: 60000,
+                });
+                console.log(chalk.cyan(`🔗 Navigate to ${url}`));
+              }
             } catch (e: any) {
-              console.log(chalk.red(`❌ Navigation error: ${e.message || String(e)}`));
+              // Check if we're offline - if so, this is expected
+              const isOfflineError = e.message && (
+                e.message.includes('ERR_INTERNET_DISCONNECTED') ||
+                e.message.includes('ERR_NAME_NOT_RESOLVED') ||
+                e.message.includes('ERR_NETWORK_CHANGED') ||
+                e.message.includes('ERR_ABORTED')
+              );
+              
+              if (isOfflineError) {
+                console.log(chalk.yellow(`⚠️ Navigation failed (offline): ${url}`));
+              } else {
+                console.log(chalk.red(`❌ Navigation error: ${e.message || String(e)}`));
+              }
             }
           }
         }

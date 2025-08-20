@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Debug Agent Network Control</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 10px;
+      margin: 0;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h2 {
+      margin-top: 0;
+      color: #333;
+      font-size: 18px;
+    }
+    .status {
+      padding: 10px;
+      background: #e8f5e9;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .status.offline {
+      background: #ffebee;
+    }
+    .presets {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    button {
+      padding: 10px 16px;
+      border: 1px solid #ddd;
+      background: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      text-align: left;
+      transition: all 0.2s;
+    }
+    button:hover {
+      background: #f5f5f5;
+      border-color: #999;
+    }
+    button.active {
+      background: #2196F3;
+      color: white;
+      border-color: #2196F3;
+    }
+    .custom-controls {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e0e0e0;
+    }
+    .control-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: #666;
+      text-transform: uppercase;
+    }
+    input[type="number"], input[type="checkbox"] {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      font-size: 14px;
+    }
+    .apply-btn {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      width: 100%;
+      padding: 12px;
+      margin-top: 10px;
+    }
+    .apply-btn:hover {
+      background: #45a049;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Network Conditions</h2>
+    
+    <div id="status" class="status">
+      Current: <strong id="currentPreset">Loading...</strong>
+    </div>
+    
+    <div class="presets" id="presets">
+      <button data-preset="No throttling">No throttling</button>
+      <button data-preset="Offline">Offline</button>
+      <button data-preset="Slow 3G">Slow 3G</button>
+      <button data-preset="Fast 3G">Fast 3G</button>
+      <button data-preset="Regular 4G">Regular 4G</button>
+    </div>
+    
+    <div class="custom-controls">
+      <h3 style="font-size: 16px; margin-top: 0;">Custom Settings</h3>
+      
+      <div class="control-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="offline"> Offline
+        </label>
+      </div>
+      
+      <div class="control-group">
+        <label for="download">Download (KB/s)</label>
+        <input type="number" id="download" placeholder="-1 for unlimited" value="-1">
+      </div>
+      
+      <div class="control-group">
+        <label for="upload">Upload (KB/s)</label>
+        <input type="number" id="upload" placeholder="-1 for unlimited" value="-1">
+      </div>
+      
+      <div class="control-group">
+        <label for="latency">Latency (ms)</label>
+        <input type="number" id="latency" placeholder="0" value="0" min="0">
+      </div>
+      
+      <button class="apply-btn" id="applyCustom">Apply Custom Settings</button>
+    </div>
+  </div>
+  
+  <script src="panel.js"></script>
+</body>
+</html>

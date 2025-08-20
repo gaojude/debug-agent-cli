@@ -3,6 +3,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { Recording, PageInfo, InteractionEvent, NetworkConditions } from "./types.js";
 import chalk from "chalk";
+import { WebSocketServer } from "ws";
 
 export class BrowserRecorder {
   private browser: Browser | null = null;
@@ -18,6 +19,10 @@ export class BrowserRecorder {
   private trackedPages: Set<Page> = new Set();
   private cdpSessions: Map<string, CDPSession> = new Map();
   private currentNetworkConditions: NetworkConditions | null = null;
+  private currentNetworkPreset: string = "No throttling";
+  private wsServer: WebSocketServer | null = null;
+  private wsClients: Set<any> = new Set();
+  private userDataDir: string | null = null;
 
   constructor(recordingPath?: string) {
     this.recording = this.initRecording();
@@ -136,25 +141,47 @@ export class BrowserRecorder {
 
     await fs.mkdir(this.recordingPath, { recursive: true });
 
-    this.browser = await chromium.launch({
+    // Get absolute path to extension
+    const extensionPath = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'chrome-extension');
+    
+    // Create a temporary user data directory for persistent context
+    this.userDataDir = path.join(this.recordingPath, `.chromium-profile-${Date.now()}`);
+    await fs.mkdir(this.userDataDir, { recursive: true });
+    
+    // Use launchPersistentContext for proper extension support
+    this.context = await chromium.launchPersistentContext(this.userDataDir, {
       headless: false,
+      viewport: null,
       args: [
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        "--disable-dev-shm-usage",
-        "--no-sandbox",
+        `--disable-extensions-except=${extensionPath}`,
+        `--load-extension=${extensionPath}`
       ],
     });
-
-    this.context = await this.browser.newContext({ viewport: null });
+    
+    this.browser = this.context.browser();
     this.isRecording = true;
     this.recording = this.initRecording();
     this.eventCounter = 0;
 
     // Listen for browser disconnection
-    this.browser.on("disconnected", () => {
+    this.browser?.on("disconnected", async () => {
       console.log(chalk.yellow("\n\nBrowser closed. Stopping recording..."));
-      if (this.browserClosedCallback) {
+      
+      // Mark as not recording to prevent double-save
+      const wasRecording = this.isRecording;
+      this.isRecording = false;
+      
+      // Clean up CDP sessions before callback
+      for (const [pageId, cdpSession] of this.cdpSessions) {
+        try {
+          await cdpSession.detach();
+        } catch (e) {
+          // Ignore - browser already closed
+        }
+      }
+      this.cdpSessions.clear();
+      
+      if (this.browserClosedCallback && wasRecording) {
         this.browserClosedCallback();
       }
     });
@@ -165,13 +192,28 @@ export class BrowserRecorder {
       }
     });
 
-    const page = await this.context.newPage();
-    if (!this.trackedPages.has(page)) {
-      await this.setupPageTracking(page);
+    // Check if a page already exists (persistent context might create one)
+    const existingPages = this.context.pages();
+    if (existingPages.length === 0) {
+      // Only create a new page if none exist
+      const page = await this.context.newPage();
+      if (!this.trackedPages.has(page)) {
+        await this.setupPageTracking(page);
+      }
+    } else {
+      // Use the existing page
+      for (const page of existingPages) {
+        if (!this.trackedPages.has(page)) {
+          await this.setupPageTracking(page);
+        }
+      }
     }
-
+    
     console.log(chalk.green.bold("✅ Recording started! Browser is ready.\n"));
-    console.log(chalk.gray("Interact with the browser. Press Ctrl+C to stop recording.\n"));
+    console.log(chalk.gray("Extension: Use the Network Recorder icon in toolbar to control network conditions\n"));
+    
+    // Start WebSocket server for extension communication
+    this.startWebSocketServer();
 
     const sessionId = Date.now().toString();
     return { success: true, sessionId };
@@ -202,72 +244,28 @@ export class BrowserRecorder {
       // Enable network domain
       await cdpSession.send('Network.enable');
       
-      // Monitor network conditions by checking periodically
-      // Note: Chrome DevTools Protocol doesn't provide real-time network condition change events
-      // This approach captures the initial state and relies on the user to manually trigger changes
-      let lastCheckedConditions = this.currentNetworkConditions;
-      const networkCheckInterval = setInterval(async () => {
-        try {
-          const currentConditions = await cdpSession.send('Network.getNetworkConditions');
-          const newConditions: NetworkConditions = {
-            offline: currentConditions.offline,
-            downloadThroughput: currentConditions.downloadThroughput,
-            uploadThroughput: currentConditions.uploadThroughput,
-            latency: currentConditions.latency
-          };
-          
-          // Check if conditions changed
-          if (!lastCheckedConditions || 
-              lastCheckedConditions.offline !== newConditions.offline ||
-              lastCheckedConditions.downloadThroughput !== newConditions.downloadThroughput ||
-              lastCheckedConditions.uploadThroughput !== newConditions.uploadThroughput ||
-              Math.abs(lastCheckedConditions.latency - newConditions.latency) > 10) {
-            
-            const presetName = this.detectNetworkConditionsChange(newConditions);
-            lastCheckedConditions = newConditions;
-            this.currentNetworkConditions = newConditions;
-            
-            this.addEvent({
-              type: "network_conditions_change",
-              data: {
-                presetName,
-                conditions: newConditions,
-                pageId
-              },
-            });
-          }
-        } catch (e) {
-          // Network conditions not available or changed, ignore
-        }
-      }, 1000); // Check every second
+      // Store CDP session for this page
+      (page as any)._cdpSession = cdpSession;
       
-      // Store interval ID for cleanup
-      (page as any)._networkCheckInterval = networkCheckInterval;
+      // Set default network conditions (no throttling)
+      const defaultConditions: NetworkConditions = {
+        offline: false,
+        downloadThroughput: -1, // -1 means no limit
+        uploadThroughput: -1,
+        latency: 0
+      };
       
-      // Get initial network conditions
-      try {
-        const initialConditions = await cdpSession.send('Network.getNetworkConditions');
-        if (initialConditions) {
-          this.currentNetworkConditions = {
-            offline: initialConditions.offline,
-            downloadThroughput: initialConditions.downloadThroughput,
-            uploadThroughput: initialConditions.uploadThroughput,
-            latency: initialConditions.latency
-          };
-          
-          const presetName = this.detectNetworkConditionsChange(this.currentNetworkConditions);
-          this.addEvent({
-            type: "network_conditions_initial",
-            data: {
-              presetName,
-              conditions: this.currentNetworkConditions,
-              pageId
-            },
-          });
-        }
-      } catch (e) {
-        // Initial conditions might not be available, ignore
-      }
+      this.currentNetworkConditions = defaultConditions;
+      
+      // Record initial network conditions
+      this.addEvent({
+        type: "network_conditions_initial",
+        data: {
+          presetName: "No throttling",
+          conditions: defaultConditions,
+          pageId
+        },
+      });
       
     } catch (e) {
       console.log(chalk.yellow(`⚠️ Could not set up network monitoring for page ${pageId}: ${e}`));
@@ -280,13 +278,22 @@ export class BrowserRecorder {
 
     let lastUrl = page.url();
     let isInitialNavigation = true;
-    let lastNavigationTime = Date.now();
-    let pendingClientNavigation = false;
-
+    let lastLoadTime = 0;
+    
     page.on("load", async () => {
       const currentUrl = page.url();
+      const currentTime = Date.now();
 
-      if (currentUrl !== lastUrl && !pendingClientNavigation) {
+      // Skip recording chrome error pages as navigation events
+      if (currentUrl.startsWith("chrome-error://")) {
+        return;
+      }
+
+      // Check if this is a refresh (same URL) or a new navigation
+      const isRefresh = currentUrl === lastUrl && (currentTime - lastLoadTime) > 500;
+      const isNewNavigation = currentUrl !== lastUrl;
+
+      if (isRefresh || isNewNavigation) {
         const pageInfo = this.pages.get(pageId);
         if (pageInfo) {
           pageInfo.url = currentUrl;
@@ -304,38 +311,28 @@ export class BrowserRecorder {
           data: {
             url: currentUrl,
             pageId,
-            navigationType: isInitialNavigation ? "initial" : "hard",
+            navigationType: isInitialNavigation ? "initial" : (isRefresh ? "refresh" : "hard"),
             previousUrl: lastUrl,
           },
         });
 
         lastUrl = currentUrl;
         isInitialNavigation = false;
-        lastNavigationTime = Date.now();
       }
 
-      pendingClientNavigation = false;
+      lastLoadTime = currentTime;
     });
 
     page.on("framenavigated", async (frame) => {
       if (frame === page.mainFrame()) {
         const currentUrl = frame.url();
-        const timeSinceLastNav = Date.now() - lastNavigationTime;
-
-        const isSameDomain = (() => {
-          try {
-            const oldUrl = new URL(lastUrl);
-            const newUrl = new URL(currentUrl);
-            return oldUrl.origin === newUrl.origin;
-          } catch {
-            return false;
-          }
-        })();
-
-        if (isSameDomain && timeSinceLastNav < 2000) {
-          pendingClientNavigation = true;
+        
+        // Skip chrome error pages
+        if (currentUrl.startsWith("chrome-error://")) {
+          return;
         }
-
+        
+        // Update page info
         const pageInfo = this.pages.get(pageId);
         if (pageInfo) {
           pageInfo.url = currentUrl;
@@ -347,10 +344,13 @@ export class BrowserRecorder {
             pageInfo.title = pageInfo.url || '';
           }
         }
+        
+        // Don't set pendingClientNavigation - let the load event handle recording
+        // This was preventing proper navigation recording
       }
     });
 
-    page.on("close", () => {
+    page.on("close", async () => {
       this.addEvent({
         type: "closetab",
         data: { pageId },
@@ -367,9 +367,9 @@ export class BrowserRecorder {
       const cdpSession = this.cdpSessions.get(pageId);
       if (cdpSession) {
         try {
-          cdpSession.detach();
+          await cdpSession.detach();
         } catch (e) {
-          // Ignore cleanup errors
+          // Ignore cleanup errors - browser might already be closed
         }
         this.cdpSessions.delete(pageId);
       }
@@ -635,10 +635,7 @@ export class BrowserRecorder {
     });
   }
 
-  async stopRecording(name?: string): Promise<string> {
-    if (!this.isRecording) return "";
-
-    this.isRecording = false;
+  private async saveRecording(name?: string): Promise<string> {
     this.recording.endTime = Date.now();
     this.recording.metadata.duration =
       this.recording.endTime - this.recording.startTime;
@@ -665,6 +662,19 @@ export class BrowserRecorder {
       );
     }
 
+    return filepath;
+  }
+
+  async stopRecording(name?: string): Promise<string> {
+    if (!this.isRecording) return "";
+    
+    // Immediately mark as not recording to prevent double-save
+    this.isRecording = false;
+    
+    // Save the recording first before any cleanup
+    const filepath = await this.saveRecording(name);
+
+    // Clean up browser after recording is saved
     if (this.browser) {
       try {
         await this.browser.close();
@@ -676,8 +686,167 @@ export class BrowserRecorder {
     return filepath;
   }
 
+  private async applyNetworkConditions(presetName: string, fromExtension: boolean = false) {
+    const presets = this.getNetworkPresets();
+    const conditions = presets[presetName];
+    
+    if (!conditions) {
+      console.log(chalk.red(`Unknown network preset: ${presetName}`));
+      return;
+    }
+    
+    // Check if conditions actually changed
+    if (this.currentNetworkPreset === presetName) {
+      return; // No change needed
+    }
+    
+    this.currentNetworkConditions = conditions;
+    this.currentNetworkPreset = presetName;
+    
+    // Apply to all active CDP sessions
+    for (const [pageId, cdpSession] of this.cdpSessions) {
+      try {
+        await cdpSession.send('Network.emulateNetworkConditions', {
+          offline: conditions.offline,
+          downloadThroughput: conditions.downloadThroughput,
+          uploadThroughput: conditions.uploadThroughput,
+          latency: conditions.latency
+        });
+      } catch (e) {
+        console.error(`Failed to apply network conditions to page ${pageId}:`, e);
+      }
+    }
+    
+    // Record the change
+    if (this.isRecording) {
+      this.addEvent({
+        type: "network_conditions_change",
+        data: {
+          presetName,
+          conditions,
+          pageId: this.currentPageId
+        }
+      });
+    }
+    
+    // Only notify extension if change didn't come from extension
+    if (!fromExtension) {
+      this.wsClients.forEach(ws => {
+        ws.send(JSON.stringify({
+          type: 'networkConditionsUpdated',
+          preset: presetName
+        }));
+      });
+    }
+    
+    console.log(chalk.green(`✅ Network changed to: ${presetName}`));
+  }
+  
+  private startWebSocketServer() {
+    this.wsServer = new WebSocketServer({ port: 9229, path: '/debug-agent' });
+    
+    this.wsServer.on('connection', (ws) => {
+      console.log(chalk.blue('Chrome extension connected'));
+      this.wsClients.add(ws);
+      
+      // Send current network conditions to newly connected client
+      ws.send(JSON.stringify({
+        type: 'setNetworkConditions',
+        preset: this.currentNetworkPreset
+      }));
+      
+      ws.on('message', async (message) => {
+        try {
+          const data = JSON.parse(message.toString());
+          
+          if (data.type === 'applyNetworkConditions') {
+            // Extension is requesting to apply network conditions
+            const preset = data.preset;
+            const conditions = data.conditions;
+            
+            if (preset) {
+              await this.applyNetworkConditions(preset, true); // true = from extension
+            } else if (conditions) {
+              // Apply custom conditions
+              this.currentNetworkConditions = conditions;
+              this.currentNetworkPreset = 'Custom';
+              
+              // Apply to all active CDP sessions
+              for (const [pageId, cdpSession] of this.cdpSessions) {
+                try {
+                  await cdpSession.send('Network.emulateNetworkConditions', {
+                    offline: conditions.offline,
+                    downloadThroughput: conditions.downloadThroughput,
+                    uploadThroughput: conditions.uploadThroughput,
+                    latency: conditions.latency
+                  });
+                } catch (e) {
+                  console.error(`Failed to apply network conditions to page ${pageId}:`, e);
+                }
+              }
+              
+              // Record the change
+              if (this.isRecording) {
+                this.addEvent({
+                  type: "network_conditions_change",
+                  data: {
+                    presetName: 'Custom',
+                    conditions: conditions,
+                    pageId: this.currentPageId
+                  }
+                });
+              }
+              
+              console.log(chalk.cyan(`Network conditions changed via extension: Custom`));
+            }
+          } else if (data.type === 'networkConditionsChanged') {
+            // Legacy handler if needed
+            this.currentNetworkConditions = data.conditions;
+            this.currentNetworkPreset = data.preset || 'Custom';
+            
+            // Record the change
+            if (this.isRecording) {
+              this.addEvent({
+                type: "network_conditions_change",
+                data: {
+                  presetName: this.currentNetworkPreset,
+                  conditions: data.conditions,
+                  pageId: this.currentPageId
+                }
+              });
+            }
+            
+            console.log(chalk.cyan(`Network conditions changed via extension: ${this.currentNetworkPreset}`));
+          }
+        } catch (e) {
+          console.error('Failed to parse WebSocket message:', e);
+        }
+      });
+      
+      ws.on('close', () => {
+        this.wsClients.delete(ws);
+        console.log(chalk.yellow('Chrome extension disconnected'));
+      });
+    });
+    
+    console.log(chalk.gray('WebSocket server started on ws://localhost:9229/debug-agent'));
+  }
+  
+  private stopWebSocketServer() {
+    if (this.wsServer) {
+      this.wsClients.forEach(ws => ws.close());
+      this.wsClients.clear();
+      this.wsServer.close();
+      this.wsServer = null;
+    }
+  }
+  
+
   async cleanup() {
     this.isRecording = false;
+    
+    // Stop WebSocket server
+    this.stopWebSocketServer();
     
     // Clean up all network check intervals
     for (const page of this.trackedPages) {
@@ -704,6 +873,16 @@ export class BrowserRecorder {
         this.browser = null;
         this.context = null;
       }
+    }
+    
+    // Clean up temporary user data directory
+    if (this.userDataDir) {
+      try {
+        await fs.rm(this.userDataDir, { recursive: true, force: true });
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+      this.userDataDir = null;
     }
   }
 

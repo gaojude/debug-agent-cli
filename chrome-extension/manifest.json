@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Debug Agent Network Recorder",
+  "version": "1.0.0",
+  "description": "Records and controls network conditions for browser debugging",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "devtools_page": "devtools.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Network Recorder",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  }
+}
