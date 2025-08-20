@@ -473,6 +473,7 @@ export class Replay {
         
         if (p && url && url !== "about:blank") {
           const current = p.url();
+          const navigationType = event.data?.navigationType;
           
           // Always navigate if it's a refresh, or if the URL is different
           if (navigationType === "refresh" || current !== url) {
