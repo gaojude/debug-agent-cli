@@ -617,21 +617,37 @@ export class BrowserRecorder {
       );
 
       function onResize() {
+        // Only track resize events from the main frame, not iframes
+        if (window !== window.top) {
+          return;
+        }
+        
+        // Ignore invalid dimensions (0x0, 1x1) which often come from hidden iframes or initialization
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        
+        if (width <= 1 || height <= 1) {
+          return;
+        }
+        
         track("viewport_resize", {
-          width: window.innerWidth,
-          height: window.innerHeight,
+          width: width,
+          height: height,
         });
       }
       onResize();
       window.addEventListener("resize", onResize);
 
-      console.log(
-        "TRACK:" +
-          JSON.stringify({
-            type: "tracking_initialized",
-            data: { url: window.location.href },
-          })
-      );
+      // Only log tracking initialized from the main frame
+      if (window === window.top) {
+        console.log(
+          "TRACK:" +
+            JSON.stringify({
+              type: "tracking_initialized",
+              data: { url: window.location.href },
+            })
+        );
+      }
     });
   }
 
