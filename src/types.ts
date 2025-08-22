@@ -51,7 +51,6 @@ export interface ReplayContext {
     timestamp: number;
     location?: any;
   }>;
-  instrumentationEvents: Array<{ timestamp: number; data: any }>;
   network: {
     requests: Array<{
       url: string;

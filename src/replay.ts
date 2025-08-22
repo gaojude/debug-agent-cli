@@ -104,7 +104,6 @@ export class Replay {
   private stopped = false;
   private logs: string[] = [];
   private consoleLogs: ReplayContext["consoleLogs"] = [];
-  private instrumentationEvents: ReplayContext["instrumentationEvents"] = [];
   private network: ReplayContext["network"] = {
     requests: [],
     responses: [],
@@ -211,14 +210,6 @@ export class Replay {
             location: msg.location(),
           });
 
-          if (text.startsWith("INSTRUMENT:")) {
-            try {
-              const data = JSON.parse(text.substring(11));
-              this.instrumentationEvents.push({ timestamp, data });
-            } catch (e) {
-              // Ignore
-            }
-          }
         });
       };
 
@@ -328,7 +319,6 @@ export class Replay {
     return {
       logs: this.logs,
       consoleLogs: this.consoleLogs,
-      instrumentationEvents: this.instrumentationEvents,
       network: this.network,
       finalResults: this.finalResults,
       meta: { startedAt, endedAt, durationMs: endedAt - startedAt },

@@ -313,7 +313,7 @@ module.exports = () => ({
     // Inject scripts into every page
     await context.addInitScript(() => {
       window.addEventListener('error', e => {
-        console.log('INSTRUMENT: Window error:', e.message);
+        console.log('Window error:', e.message);
       });
     });
     
