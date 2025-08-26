@@ -1,14 +1,14 @@
 # Debug Agent CLI
 
-A command-line tool for recording, replaying, and analyzing browser sessions with AI-powered debugging capabilities.
+A command-line tool for recording and replaying browser sessions designed for LLM agents and browser automation testing.
 
 ## Features
 
 - 🎥 **Record Browser Sessions**: Capture all user interactions including clicks, inputs, navigation, and more
-- ▶️ **Replay Recordings**: Replay recorded sessions at different speeds with visual feedback
-- 🔍 **AI-Powered Analysis**: Analyze recordings with natural language questions to understand user behavior
-- 💬 **Interactive Chat**: Chat interface for exploring recordings and debugging issues
-- 📊 **Session Management**: List, delete, and manage recorded sessions
+- ▶️ **Replay Recordings**: Replay recorded sessions at different speeds with custom instrumentation
+- 🔍 **Session Inspection**: Analyze recording structure and events for instrumentation development
+- 🛠️ **Custom Instrumentation**: Inject JavaScript during replay for monitoring and testing
+- 🌐 **Chrome Extension**: Browser extension for enhanced recording capabilities
 
 ## Installation
 
@@ -19,120 +19,91 @@ pnpm build
 
 ## Usage
 
-### Interactive Mode
-
-Simply run the command without arguments to enter interactive mode:
-
-```bash
-pnpm start
-```
+The CLI provides three main commands: `record`, `inspect`, and `replay`.
 
 ### Record a Browser Session
 
 ```bash
-pnpm start record --name my-session
+debug-agent record ./recordings/my-session.json
 ```
 
 This will:
 1. Open a Chromium browser window
 2. Track all interactions (clicks, inputs, navigation, etc.)
-3. Save the recording when you press Ctrl+C
+3. Save the recording when you close the browser or press Ctrl+C
+4. Create parent directories automatically if they don't exist
+
+### Inspect a Recording
+
+Analyze the structure and events in a recording file:
+
+```bash
+# Show basic info and event types
+debug-agent inspect ./recordings/my-session.json --events
+
+# Get detailed schema for instrumentation development
+debug-agent inspect ./recordings/my-session.json --schema --sample 3
+```
+
+Options:
+- `--events`: List all event types and counts
+- `--schema`: Output detailed event schema for instrumentation development
+- `--sample <n>`: Show sample events of each type (default: 2)
 
 ### Replay a Recording
 
 ```bash
-pnpm start replay my-session --speed 2
+debug-agent replay ./recordings/my-session.json
 ```
 
 Options:
-- `--speed <speed>`: Playback speed (0.5 to 3, default: 1)
+- `--speed <speed>`: Playback speed (0.5 to 3.0, default: 1.0)
 - `--headless`: Run in headless mode
 - `--url <url>`: Override base URL for navigation events (useful for testing recordings against different environments)
+- `--instrument <file.js>`: Inject custom JavaScript instrumentation during replay
 
 Example with URL override:
 ```bash
 # Original recording was made on https://production.example.com
 # Replay it against staging environment
-pnpm start replay my-session --url https://staging.example.com
+debug-agent replay ./recordings/my-session.json --url https://staging.example.com
 
-# Or replay against local development server
-pnpm start replay my-session --url http://localhost:3000
+# Replay with custom instrumentation
+debug-agent replay ./recordings/my-session.json --instrument ./monitor.js
 ```
 
-### List Recordings
+### Custom Instrumentation
 
-```bash
-pnpm start list
-```
+Create JavaScript files with instrumentation logic to run during replay:
 
-### Analyze a Recording
-
-Ask questions about what happened during a recorded session:
-
-```bash
-pnpm start analyze my-session "How many times did the user click?"
-```
-
-Example questions:
-- "How many clicks were made?"
-- "What API calls were made?"
-- "Did any errors occur?"
-- "What forms were submitted?"
-- "How many page navigations happened?"
-
-### Chat Interface
-
-Start an interactive chat to explore recordings:
-
-```bash
-pnpm start chat --recording my-session
-```
-
-Chat commands:
-- `/record` - Start a new recording
-- `/stop` - Stop current recording
-- `/replay [name]` - Replay a recording
-- `/list` - List all recordings
-- `/analyze [name] "question"` - Analyze a recording
-- `/delete [name]` - Delete a recording
-- `/use [name]` - Set current recording for analysis
-
-### Delete a Recording
-
-```bash
-pnpm start delete my-session
-```
-
-## Environment Variables
-
-Set these in your `.env` file:
-
-```bash
-# AI Model configuration (optional)
-AI_MODEL=gpt-4o  # or claude-3, etc.
-
-# API keys for AI services
-OPENAI_API_KEY=your-key-here
-# or
-ANTHROPIC_API_KEY=your-key-here
+```javascript
+// monitor.js - Example instrumentation file
+export async function setup(browser, context, page, pageMap) {
+  // Full access to Playwright objects
+  // Add listeners, inject scripts, monitor everything
+  
+  context.on('page', (page) => {
+    page.on('response', (response) => {
+      console.log('API Response:', response.url(), response.status());
+    });
+  });
+}
 ```
 
 ## How It Works
 
-1. **Recording**: Uses Playwright to capture browser interactions and page events
-2. **Storage**: Saves recordings as JSON files with all event data
-3. **Replay**: Reconstructs the session by replaying events in sequence
-4. **Analysis**: Generates custom instrumentation code to answer specific questions about the recording
-5. **AI Integration**: Uses LLMs to understand questions and generate analysis code
+1. **Recording**: Uses Playwright to capture all browser interactions and page events
+2. **Storage**: Saves recordings as JSON files with complete event data and metadata
+3. **Replay**: Reconstructs sessions by replaying events in sequence with timing
+4. **Instrumentation**: Provides full Playwright API access during replay for custom monitoring
 
 ## Architecture
 
-- `recorder.ts` - Browser recording functionality
+- `cli.ts` - Command-line interface with record, inspect, and replay commands
+- `recorder.ts` - Browser recording functionality using Playwright
 - `replay.ts` - Session replay engine with instrumentation support
-- `analyzer.ts` - AI-powered analysis with dynamic instrumentation
-- `storage.ts` - Recording file management
-- `chat.ts` - Interactive chat interface
-- `cli.ts` - Command-line interface
+- `types.ts` - TypeScript type definitions
+- `chrome-extension/` - Browser extension for enhanced recording capabilities
 
 ## Development
 
@@ -143,14 +114,15 @@ pnpm dev
 # Build the project
 pnpm build
 
-# Run built version
-pnpm start
+# Run built version (after global install)
+debug-agent --help
 ```
 
 ## Install to Global
-This is for debugging only.
 
 ```bash
 pnpm build
 pnpm link --global
 ```
+
+After global installation, the `debug-agent` command will be available system-wide.
